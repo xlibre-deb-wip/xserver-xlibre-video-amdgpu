@@ -1,7 +1,8 @@
 Source: xserver-xorg-video-amdgpu
 Section: x11
 Priority: optional
-Maintainer: Debian X Strike Force <debian-x@lists.debian.org>
+Maintainer: Ubuntu X-SWAT <ubuntu-x@lists.ubuntu.com>
+XSBC-Original-Maintainer: Debian X Strike Force <debian-x@lists.debian.org>
 Uploaders: Timo Aaltonen <tjaalton@debian.org>
 Build-Depends:
  debhelper (>= 9),
