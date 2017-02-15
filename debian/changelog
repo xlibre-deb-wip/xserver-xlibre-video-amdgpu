@@ -1,3 +1,9 @@
+xserver-xorg-video-amdgpu (1.2.0-1~bpo8+1) jessie-backports; urgency=medium
+
+  * Rebuild for jessie-backports.
+
+ -- Andreas Boll <andreas.boll.dev@gmail.com>  Wed, 15 Feb 2017 18:48:51 +0100
+
 xserver-xorg-video-amdgpu (1.2.0-1) unstable; urgency=medium
 
   * New upstream release.
