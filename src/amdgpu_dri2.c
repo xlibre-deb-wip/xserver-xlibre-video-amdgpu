@@ -563,7 +563,7 @@ amdgpu_dri2_schedule_flip(xf86CrtcPtr crtc, ClientPtr client,
 			       AMDGPU_DRM_QUEUE_ID_DEFAULT, flip_info,
 			       ref_crtc_hw_id,
 			       amdgpu_dri2_flip_event_handler,
-			       amdgpu_dri2_flip_event_abort)) {
+			       amdgpu_dri2_flip_event_abort, FLIP_VSYNC)) {
 		info->drmmode.dri2_flipping = TRUE;
 		return TRUE;
 	}
@@ -603,7 +603,10 @@ can_exchange(ScrnInfoPtr pScrn, DrawablePtr draw,
 
 	for (i = 0; i < xf86_config->num_crtc; i++) {
 		xf86CrtcPtr crtc = xf86_config->crtc[i];
-		if (crtc->enabled && crtc->rotatedData)
+		drmmode_crtc_private_ptr drmmode_crtc = crtc->driver_private;
+
+		if (crtc->enabled &&
+		    (crtc->rotatedData || drmmode_crtc->scanout[0].bo))
 			return FALSE;
 	}
 
@@ -1032,7 +1035,7 @@ static int amdgpu_dri2_schedule_wait_msc(ClientPtr client, DrawablePtr draw,
 	drm_queue_seq = amdgpu_drm_queue_alloc(crtc, client, AMDGPU_DRM_QUEUE_ID_DEFAULT,
 					       wait_info, amdgpu_dri2_frame_event_handler,
 					       amdgpu_dri2_frame_event_abort);
-	if (!drm_queue_seq) {
+	if (drm_queue_seq == AMDGPU_DRM_QUEUE_ERROR) {
 		xf86DrvMsg(scrn->scrnIndex, X_WARNING,
 			   "Allocating DRM queue event entry failed.\n");
 		goto out_complete;
@@ -1180,7 +1183,7 @@ static int amdgpu_dri2_schedule_swap(ClientPtr client, DrawablePtr draw,
 	drm_queue_seq = amdgpu_drm_queue_alloc(crtc, client, AMDGPU_DRM_QUEUE_ID_DEFAULT,
 					       swap_info, amdgpu_dri2_frame_event_handler,
 					       amdgpu_dri2_frame_event_abort);
-	if (!drm_queue_seq) {
+	if (drm_queue_seq == AMDGPU_DRM_QUEUE_ERROR) {
 		xf86DrvMsg(scrn->scrnIndex, X_WARNING,
 			   "Allocating DRM queue entry failed.\n");
 		goto blit_fallback;
