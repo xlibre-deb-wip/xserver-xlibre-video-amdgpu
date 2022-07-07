@@ -1,9 +1,9 @@
-xserver-xorg-video-amdgpu (22.0.0-2) UNRELEASED; urgency=medium
+xserver-xorg-video-amdgpu (22.0.0-2) unstable; urgency=medium
 
   * Added patches from git to fix slow refresh rate with Displaylink
     output. (LP: #1875015)
 
- -- Timo Aaltonen <tjaalton@debian.org>  Thu, 07 Jul 2022 11:28:37 +0300
+ -- Timo Aaltonen <tjaalton@debian.org>  Thu, 07 Jul 2022 11:29:03 +0300
 
 xserver-xorg-video-amdgpu (22.0.0-1) unstable; urgency=medium
 
