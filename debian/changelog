@@ -1,3 +1,10 @@
+xserver-xorg-video-amdgpu (22.0.0-3) unstable; urgency=medium
+
+  * Added patch from git to fix slow refresh rate with AMD GPU Screen
+    output in reverse prime mode. (LP: #1987038)
+
+ -- Kai-Heng Feng <kai.heng.feng@canonical.com>  Fri, 19 Aug 2022 13:16:55 +0800
+
 xserver-xorg-video-amdgpu (22.0.0-2) unstable; urgency=medium
 
   * Added patches from git to fix slow refresh rate with Displaylink

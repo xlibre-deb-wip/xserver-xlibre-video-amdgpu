@@ -2,3 +2,4 @@
 0002-Use-randr_crtc_covering_drawable-used-in-modesetting.patch
 0003-Prefer-crtc-of-primary-output-for-synchronization-wh.patch
 0004-Do-not-consider-disabled-crtc-anymore-when-looking-f.patch
+0005-Initialize-present-extension-for-GPU-screen.patch
