@@ -1,3 +1,9 @@
+xserver-xorg-video-amdgpu (23.0.0-1) UNRELEASED; urgency=medium
+
+  * New upstream release. (Closes: #1031021)
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Sun, 26 Feb 2023 11:15:04 +0200
+
 xserver-xorg-video-amdgpu (22.0.0-3) unstable; urgency=medium
 
   * Added patch from git to fix slow refresh rate with AMD GPU Screen
