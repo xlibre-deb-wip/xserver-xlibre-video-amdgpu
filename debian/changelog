@@ -2,6 +2,7 @@ xserver-xorg-video-amdgpu (23.0.0-1) UNRELEASED; urgency=medium
 
   * New upstream release. (Closes: #1031021)
   * upstream: Add signing key from Shashank Sharma.
+  * patches: Dropped, all upstream.
 
  -- Timo Aaltonen <tjaalton@debian.org>  Sun, 26 Feb 2023 11:15:04 +0200
 
