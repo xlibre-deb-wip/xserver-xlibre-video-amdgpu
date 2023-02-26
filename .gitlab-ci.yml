@@ -16,10 +16,12 @@ include:
   - project: 'freedesktop/ci-templates'
     ref: 59de540b620c45739871d1a073d76d5521989d11
     file: '/templates/debian.yml'
+  - template: Security/SAST.gitlab-ci.yml
 
 stages:
   - docker-image
   - build
+  - test
 
 .debian-testing:
   variables:
