@@ -23,10 +23,8 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
  */
-
-#ifdef HAVE_CONFIG_H
 #include "config.h"
-#endif
+#include <xorg-server.h>
 
 #ifdef USE_GLAMOR
 
@@ -37,10 +35,6 @@
 #include "amdgpu_glamor.h"
 
 #include <gbm.h>
-
-#ifndef HAVE_GLAMOR_FINISH
-#include <GL/gl.h>
-#endif
 
 DevPrivateKeyRec amdgpu_pixmap_index;
 
@@ -62,11 +56,6 @@ Bool amdgpu_glamor_create_screen_resources(ScreenPtr screen)
 	if (!info->use_glamor)
 		return TRUE;
 
-#ifdef HAVE_GLAMOR_GLYPHS_INIT
-	if (!glamor_glyphs_init(screen))
-		return FALSE;
-#endif
-
 	return amdgpu_glamor_create_textured_pixmap(screen_pixmap,
 						    info->front_buffer);
 }
@@ -74,28 +63,15 @@ Bool amdgpu_glamor_create_screen_resources(ScreenPtr screen)
 Bool amdgpu_glamor_pre_init(ScrnInfoPtr scrn)
 {
 	AMDGPUInfoPtr info = AMDGPUPTR(scrn);
-	pointer glamor_module;
+	void* glamor_module;
 	CARD32 version;
 
-#if XORG_VERSION_CURRENT < XORG_VERSION_NUMERIC(1,20,99,0,0)
-	if (scrn->depth < 24) {
-#else
 	if (scrn->depth < 15) {
-#endif
 		xf86DrvMsg(scrn->scrnIndex, X_ERROR,
 			   "Depth %d not supported with glamor, disabling\n",
 			   scrn->depth);
 		return FALSE;
 	}
-
-#if XORG_VERSION_CURRENT < XORG_VERSION_NUMERIC(1,15,0,0,0)
-	if (!xf86LoaderCheckSymbol("glamor_egl_init")) {
-		xf86DrvMsg(scrn->scrnIndex, X_ERROR,
-			   "glamor requires Load \"glamoregl\" in "
-			   "Section \"Module\", disabling.\n");
-		return FALSE;
-	}
-#endif
 
 	/* Load glamor module */
 	if ((glamor_module = xf86LoadSubModule(scrn, GLAMOR_EGL_MODULE_NAME))) {
@@ -145,11 +121,8 @@ amdgpu_glamor_create_textured_pixmap(PixmapPtr pixmap, struct amdgpu_buffer *bo)
 
 	if (bo->flags & AMDGPU_BO_FLAGS_GBM) {
 		return glamor_egl_create_textured_pixmap_from_gbm_bo(pixmap,
-								     bo->bo.gbm
-#if XORG_VERSION_CURRENT > XORG_VERSION_NUMERIC(1,19,99,903,0)
-								     , FALSE
-#endif
-								     );
+								     bo->bo.gbm,
+								     FALSE);
 	} else {
 		uint32_t bo_handle;
 
@@ -163,11 +136,9 @@ amdgpu_glamor_create_textured_pixmap(PixmapPtr pixmap, struct amdgpu_buffer *bo)
 
 static Bool amdgpu_glamor_destroy_pixmap(PixmapPtr pixmap)
 {
-#ifndef HAVE_GLAMOR_EGL_DESTROY_TEXTURED_PIXMAP
 	ScreenPtr screen = pixmap->drawable.pScreen;
 	AMDGPUInfoPtr info = AMDGPUPTR(xf86ScreenToScrn(screen));
-	Bool ret;
-#endif
+	Bool ret = TRUE;
 
 	if (pixmap->refcnt == 1) {
 		if (pixmap->devPrivate.ptr) {
@@ -176,24 +147,16 @@ static Bool amdgpu_glamor_destroy_pixmap(PixmapPtr pixmap)
 			if (bo)
 				amdgpu_bo_unmap(bo);
 		}
-
-#ifdef HAVE_GLAMOR_EGL_DESTROY_TEXTURED_PIXMAP
-		glamor_egl_destroy_textured_pixmap(pixmap);
-#endif
 		amdgpu_set_pixmap_bo(pixmap, NULL);
 	}
 
-#ifdef HAVE_GLAMOR_EGL_DESTROY_TEXTURED_PIXMAP
-	fbDestroyPixmap(pixmap);
-	return TRUE;
-#else
 	screen->DestroyPixmap = info->glamor.SavedDestroyPixmap;
-	ret = screen->DestroyPixmap(pixmap);
+	if (screen->DestroyPixmap)
+		ret = screen->DestroyPixmap(pixmap);
 	info->glamor.SavedDestroyPixmap = screen->DestroyPixmap;
 	screen->DestroyPixmap = amdgpu_glamor_destroy_pixmap;
 
 	return ret;
-#endif
 }
 
 static PixmapPtr
@@ -346,7 +309,7 @@ amdgpu_glamor_set_pixmap_bo(DrawablePtr drawable, PixmapPtr pixmap)
 				   0, 0, pixmap->devKind, NULL);
 	old->devPrivate.ptr = NULL;
 
-	screen->DestroyPixmap(pixmap);
+	dixDestroyPixmap(pixmap, 0);
 
 	return old;
 }
@@ -366,7 +329,9 @@ amdgpu_glamor_share_pixmap_backing(PixmapPtr pixmap, ScreenPtr secondary,
 
 	tiling_info = amdgpu_pixmap_get_tiling_info(pixmap);
 
-	if (info->family >= AMDGPU_FAMILY_AI)
+	if (info->family >= AMDGPU_FAMILY_GC_12_0_0)
+		is_linear = AMDGPU_TILING_GET(tiling_info, GFX12_SWIZZLE_MODE) == 0;
+	else if (info->family >= AMDGPU_FAMILY_AI)
 		is_linear = AMDGPU_TILING_GET(tiling_info, SWIZZLE_MODE) == 0;
 	else
 		is_linear = AMDGPU_TILING_GET(tiling_info, ARRAY_MODE) == 1;
@@ -432,18 +397,14 @@ Bool amdgpu_glamor_init(ScreenPtr screen)
 	ScrnInfoPtr scrn = xf86ScreenToScrn(screen);
 	AMDGPUInfoPtr info = AMDGPUPTR(scrn);
 #ifdef RENDER
-#ifdef HAVE_FBGLYPHS
 	UnrealizeGlyphProcPtr SavedUnrealizeGlyph = NULL;
-#endif
 	PictureScreenPtr ps = NULL;
 
 	if (info->shadow_primary) {
 		ps = GetPictureScreenIfSet(screen);
 
 		if (ps) {
-#ifdef HAVE_FBGLYPHS
 			SavedUnrealizeGlyph = ps->UnrealizeGlyph;
-#endif
 			info->glamor.SavedGlyphs = ps->Glyphs;
 			info->glamor.SavedTriangles = ps->Triangles;
 			info->glamor.SavedTrapezoids = ps->Trapezoids;
@@ -459,18 +420,13 @@ Bool amdgpu_glamor_init(ScreenPtr screen)
 		return FALSE;
 	}
 
-	if (!glamor_egl_init_textured_pixmap(screen)) {
-		xf86DrvMsg(scrn->scrnIndex, X_ERROR,
-			   "Failed to initialize textured pixmap of screen for glamor.\n");
-		return FALSE;
-	}
 	if (!dixRegisterPrivateKey(&amdgpu_pixmap_index, PRIVATE_PIXMAP, 0))
 		return FALSE;
 
 	if (info->shadow_primary)
 		amdgpu_glamor_screen_init(screen);
 
-#if defined(RENDER) && defined(HAVE_FBGLYPHS)
+#if defined(RENDER)
 	/* For ShadowPrimary, we need fbUnrealizeGlyph instead of
 	 * glamor_unrealize_glyph
 	 */
@@ -508,13 +464,8 @@ void amdgpu_glamor_finish(ScrnInfoPtr pScrn)
 	AMDGPUInfoPtr info = AMDGPUPTR(pScrn);
 
 	if (info->use_glamor) {
-#if HAVE_GLAMOR_FINISH
 		glamor_finish(pScrn->pScreen);
 		info->gpu_flushed++;
-#else
-		amdgpu_glamor_flush(pScrn);
-		glFinish();
-#endif
 	}
 }
 

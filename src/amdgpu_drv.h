@@ -89,25 +89,6 @@
 
 struct _SyncFence;
 
-#ifndef HAVE_REGIONDUPLICATE
-
-static inline RegionPtr
-RegionDuplicate(RegionPtr pOld)
-{
-	RegionPtr pNew;
-
-	pNew = RegionCreate(&pOld->extents, 0);
-	if (!pNew)
-		return NULL;
-	if (!RegionCopy(pNew, pOld)) {
-		RegionDestroy(pNew);
-		return NULL;
-	}
-	return pNew;
-}
-
-#endif
-
 #ifndef MAX
 #define MAX(a,b) ((a)>(b)?(a):(b))
 #endif
@@ -186,11 +167,7 @@ amdgpu_dirty_primary(PixmapDirtyUpdatePtr dirty)
 static inline DrawablePtr
 amdgpu_dirty_src_drawable(PixmapDirtyUpdatePtr dirty)
 {
-#ifdef HAS_DIRTYTRACKING_DRAWABLE_SRC
 	return dirty->src;
-#else
-	return &dirty->src->drawable;
-#endif
 }
 
 static inline Bool
@@ -355,11 +332,7 @@ Bool amdgpu_dri3_screen_init(ScreenPtr screen);
 Bool amdgpu_window_has_variable_refresh(WindowPtr win);
 Bool amdgpu_scanout_do_update(xf86CrtcPtr xf86_crtc, int scanout_id,
 			      PixmapPtr src_pix, BoxRec extents);
-void AMDGPUWindowExposures_oneshot(WindowPtr pWin, RegionPtr pRegion
-#if XORG_VERSION_CURRENT < XORG_VERSION_NUMERIC(1,16,99,901,0)
-				   , RegionPtr pBSRegion
-#endif
-				   );
+void AMDGPUWindowExposures_oneshot(WindowPtr pWin, RegionPtr pRegion);
 
 /* amdgpu_present.c */
 void amdgpu_present_set_screen_vrr(ScrnInfoPtr scrn, Bool vrr_enabled);
@@ -377,5 +350,7 @@ extern xf86CrtcPtr amdgpu_pick_best_crtc(ScreenPtr pScreen,
 extern RRCrtcPtr amdgpu_randr_crtc_covering_drawable(DrawablePtr pDraw);
 
 extern AMDGPUEntPtr AMDGPUEntPriv(ScrnInfoPtr pScrn);
+
+extern int gAMDGPUEntityIndex;
 
 #endif /* _AMDGPU_DRV_H_ */

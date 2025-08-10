@@ -25,10 +25,8 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
  */
-
-#ifdef HAVE_CONFIG_H
 #include "config.h"
-#endif
+#include <xorg-server.h>
 
 #include <errno.h>
 #include <string.h>
@@ -57,7 +55,7 @@
 
 #include <xf86platformBus.h>
 
-_X_EXPORT int gAMDGPUEntityIndex = -1;
+int gAMDGPUEntityIndex = -1;
 
 /* Return the options for supported chipset 'n'; NULL otherwise */
 static const OptionInfoRec *AMDGPUAvailableOptions(int chipid, int busid)
@@ -129,21 +127,17 @@ static int amdgpu_kernel_open_fd(ScrnInfoPtr pScrn,
 		    dev->domain, dev->bus, dev->dev, dev->func);
 
 	if (platform_dev) {
-#ifdef ODEV_ATTRIB_FD
 		fd = xf86_get_platform_device_int_attrib(platform_dev,
 							 ODEV_ATTRIB_FD, -1);
 		if (fd != -1)
 			return fd;
-#endif
 
-#ifdef ODEV_ATTRIB_PATH
 		path = xf86_get_platform_device_attrib(platform_dev,
 						       ODEV_ATTRIB_PATH);
 
 		fd = open(path, O_RDWR | O_CLOEXEC);
 		if (fd != -1)
 			return fd;
-#endif
 	}
 
 	if (!amdgpu_kernel_mode_enabled(pScrn))
@@ -175,7 +169,7 @@ static int amdgpu_kernel_open_fd(ScrnInfoPtr pScrn,
 
 void amdgpu_kernel_close_fd(AMDGPUEntPtr pAMDGPUEnt)
 {
-#if defined(XSERVER_PLATFORM_BUS) && defined(XF86_PDEV_SERVER_FD)
+#if defined(XSERVER_PLATFORM_BUS)
 	if (!(pAMDGPUEnt->platform_dev &&
 	      pAMDGPUEnt->platform_dev->flags & XF86_PDEV_SERVER_FD))
 #endif
@@ -277,7 +271,7 @@ amdgpu_probe(ScrnInfoPtr pScrn, int entity_num,
 	pPriv = xf86GetEntityPrivate(pEnt->index, gAMDGPUEntityIndex);
 
 	if (!pPriv->ptr) {
-		pPriv->ptr = xnfcalloc(sizeof(AMDGPUEntRec), 1);
+		pPriv->ptr = XNFcallocarray(sizeof(AMDGPUEntRec), 1);
 		if (!pPriv->ptr)
 			goto error;
 
@@ -332,10 +326,8 @@ static Bool AMDGPUDriverFunc(ScrnInfoPtr scrn, xorgDriverFuncOp op, void *data)
 		flag = (CARD32 *) data;
 		(*flag) = 0;
 		return TRUE;
-#if XORG_VERSION_CURRENT > XORG_VERSION_NUMERIC(1,15,99,0,0)
 	case SUPPORTS_SERVER_FDS:
 		return TRUE;
-#endif
        default:
 		return FALSE;
 	}

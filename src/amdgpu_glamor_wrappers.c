@@ -26,11 +26,11 @@
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
  */
-
-
-#ifdef HAVE_CONFIG_H
 #include <config.h>
-#endif
+#include <xorg-server.h>
+
+#include <fb.h>
+#include <fbpict.h>
 
 #ifdef USE_GLAMOR
 
@@ -434,7 +434,7 @@ amdgpu_glamor_poly_fill_rect(DrawablePtr pDrawable, GCPtr pGC,
 static void
 amdgpu_glamor_image_glyph_blt(DrawablePtr pDrawable, GCPtr pGC,
 			      int x, int y, unsigned int nglyph,
-			      CharInfoPtr *ppci, pointer pglyphBase)
+			      CharInfoPtr *ppci, void* pglyphBase)
 {
 	ScrnInfoPtr scrn = xf86ScreenToScrn(pDrawable->pScreen);
 	PixmapPtr pixmap = get_drawable_pixmap(pDrawable);
@@ -453,7 +453,7 @@ amdgpu_glamor_image_glyph_blt(DrawablePtr pDrawable, GCPtr pGC,
 static void
 amdgpu_glamor_poly_glyph_blt(DrawablePtr pDrawable, GCPtr pGC,
 			     int x, int y, unsigned int nglyph,
-			     CharInfoPtr *ppci, pointer pglyphBase)
+			     CharInfoPtr *ppci, void* pglyphBase)
 {
 	ScrnInfoPtr scrn = xf86ScreenToScrn(pDrawable->pScreen);
 	PixmapPtr pixmap = get_drawable_pixmap(pDrawable);

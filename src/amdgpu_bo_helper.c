@@ -19,12 +19,12 @@
  * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
  * OTHER DEALINGS IN THE SOFTWARE.
  */
-
-#ifdef HAVE_CONFIG_H
 #include "config.h"
-#endif
+#include <xorg-server.h>
+
 #include <sys/mman.h>
 #include <gbm.h>
+
 #include "amdgpu_drv.h"
 #include "amdgpu_bo_helper.h"
 #include "amdgpu_glamor.h"
@@ -82,12 +82,13 @@ struct amdgpu_buffer *amdgpu_alloc_pixmap_bo(ScrnInfoPtr pScrn, int width,
 		if (usage_hint & AMDGPU_CREATE_PIXMAP_SCANOUT)
 			bo_use |= GBM_BO_USE_SCANOUT;
 
-#ifdef HAVE_GBM_BO_USE_LINEAR
+		if (usage_hint & AMDGPU_CREATE_PIXMAP_FRONT)
+			bo_use |= GBM_BO_USE_FRONT_RENDERING;
+
 		if (usage_hint == CREATE_PIXMAP_USAGE_SHARED ||
 		    (usage_hint & AMDGPU_CREATE_PIXMAP_LINEAR)) {
 			bo_use |= GBM_BO_USE_LINEAR;
 		}
-#endif
 
 		pixmap_buffer->bo.gbm = gbm_bo_create(info->gbm, width, height,
 						      gbm_format,
@@ -201,7 +202,7 @@ Bool amdgpu_pixmap_get_handle(PixmapPtr pixmap, uint32_t *handle)
 
 	if (priv->handle_valid)
 		goto success;
-	
+
 #ifdef USE_GLAMOR
 	if (info->use_glamor) {
 		AMDGPUEntPtr pAMDGPUEnt = AMDGPUEntPriv(scrn);

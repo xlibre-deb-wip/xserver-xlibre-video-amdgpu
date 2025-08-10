@@ -1,7 +1,5 @@
-
-#ifdef HAVE_CONFIG_H
 #include "config.h"
-#endif
+#include <xorg-server.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -17,14 +15,7 @@
 #include "xf86.h"
 #include "dixstruct.h"
 
-/* DPMS */
-#ifdef HAVE_XEXTPROTO_71
 #include <X11/extensions/dpmsconst.h>
-#else
-#define DPMS_SERVER
-#include <X11/extensions/dpms.h>
-#endif
-
 #include <X11/extensions/Xv.h>
 #include "fourcc.h"
 
@@ -148,7 +139,6 @@ amdgpu_crtc_covering_box(ScreenPtr pScreen, BoxPtr box, Bool screen_is_xf86_hint
 	return best_crtc;
 }
 
-#if ABI_VIDEODRV_VERSION >= SET_ABI_VERSION(23, 0)
 static RRCrtcPtr
 amdgpu_crtc_covering_box_on_secondary(ScreenPtr pScreen, BoxPtr box)
 {
@@ -168,7 +158,6 @@ amdgpu_crtc_covering_box_on_secondary(ScreenPtr pScreen, BoxPtr box)
 
 	return NULL;
 }
-#endif
 
 RRCrtcPtr
 amdgpu_randr_crtc_covering_drawable(DrawablePtr pDraw)
@@ -183,11 +172,9 @@ amdgpu_randr_crtc_covering_drawable(DrawablePtr pDraw)
 	box.y2 = box.y1 + pDraw->height;
 
 	crtc = amdgpu_crtc_covering_box(pScreen, &box, TRUE);
-#if ABI_VIDEODRV_VERSION >= SET_ABI_VERSION(23, 0)
 	if (!crtc) {
 		crtc = amdgpu_crtc_covering_box_on_secondary(pScreen, &box);
 	}
-#endif
 	return crtc;
 }
 

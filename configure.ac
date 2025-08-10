@@ -57,11 +57,12 @@ fi
 AH_TOP([#include "xorg-server.h"])
 
 # Define a configure option for an alternate module directory
+PKG_PROG_PKG_CONFIG([0.25])
 AC_ARG_WITH(xorg-module-dir,
             AS_HELP_STRING([--with-xorg-module-dir=DIR],
-                           [Default xorg module directory [[default=$libdir/xorg/modules]]]),
+                           [Default xorg module directory]),
             [moduledir="$withval"],
-            [moduledir="$libdir/xorg/modules"])
+            [moduledir=`$PKG_CONFIG --variable=moduledir xorg-server`])
 
 # Store the list of server defined optional extensions in REQUIRED_MODULES
 XORG_DRIVER_CHECK_EXT(RANDR, randrproto)
@@ -70,16 +71,13 @@ XORG_DRIVER_CHECK_EXT(XV, videoproto)
 XORG_DRIVER_CHECK_EXT(DPMSExtension, xextproto)
 
 # Checks for libraries.
-PKG_CHECK_MODULES(LIBDRM, [libdrm >= 2.4.89])
-PKG_CHECK_MODULES(LIBDRM_AMDGPU, [libdrm_amdgpu >= 2.4.76])
+PKG_CHECK_MODULES(LIBDRM, [libdrm >= 2.4.121])
+PKG_CHECK_MODULES(LIBDRM_AMDGPU, [libdrm_amdgpu >= 2.4.121])
 PKG_CHECK_MODULES(GBM, [gbm])
 
 # Obtain compiler/linker options for the driver dependencies
-PKG_CHECK_MODULES(XORG, [xorg-server >= 1.13 xproto fontsproto xf86driproto $REQUIRED_MODULES])
-PKG_CHECK_MODULES(XEXT, [xextproto >= 7.0.99.1],
-                  HAVE_XEXTPROTO_71="yes"; AC_DEFINE(HAVE_XEXTPROTO_71, 1, [xextproto 7.1 available]),
-                  HAVE_XEXTPROTO_71="no")
-AM_CONDITIONAL(HAVE_XEXTPROTO_71, [ test "$HAVE_XEXTPROTO_71" = "yes" ])
+PKG_CHECK_MODULES(XORG, [xorg-server >= 1.18 xproto fontsproto xf86driproto $REQUIRED_MODULES])
+PKG_CHECK_MODULES(XEXT, [xextproto >= 7.0.99.1])
 
 # Section "OutputClass" is only supported as of xserver 1.16
 PKG_CHECK_EXISTS([xorg-server >= 1.16],
@@ -121,85 +119,11 @@ AC_ARG_ENABLE(glamor,
 
 if test "x$GLAMOR" != "xno"; then
 	AC_CHECK_HEADERS([glamor.h], [GLAMOR_H="yes"], [GLAMOR_H="no"], [#include "xorg-server.h"])
-
-	if test "x$GLAMOR_H" = xyes; then
-		AC_CHECK_DECL(GLAMOR_NO_DRI3,
-			      [GLAMOR_XSERVER="yes"], [GLAMOR_XSERVER="no"],
-			      [#include "xorg-server.h"
-			       #include "glamor.h"])
-
-		AC_CHECK_DECL(glamor_glyphs_init,
-			      [AC_DEFINE(HAVE_GLAMOR_GLYPHS_INIT, 1,
-					 [Have glamor_glyphs_init API])], [],
-			      [#include "xorg-server.h"
-			       #include "glamor.h"])
-
-		AC_CHECK_DECL(glamor_egl_destroy_textured_pixmap,
-			      [AC_DEFINE(HAVE_GLAMOR_EGL_DESTROY_TEXTURED_PIXMAP, 1,
-					 [Have glamor_egl_destroy_textured_pixmap API])], [],
-			      [#include "xorg-server.h"
-			       #include "glamor.h"])
-
-		AC_CHECK_DECL(glamor_finish,
-			      [AC_DEFINE(HAVE_GLAMOR_FINISH, 1,
-					 [Have glamor_finish API])],
-					 [PKG_CHECK_MODULES(LIBGL, [gl])],
-			      [#include "xorg-server.h"
-			       #include "glamor.h"])
-	fi
-
-	if test "x$GLAMOR_XSERVER" != xyes; then
-		PKG_CHECK_MODULES(LIBGLAMOR, [glamor >= 0.6.0])
-		PKG_CHECK_MODULES(LIBGLAMOR_EGL, [glamor-egl])
-	fi
 	AC_DEFINE(USE_GLAMOR, 1, [Enable glamor acceleration])
 else
 	AC_MSG_RESULT([$GLAMOR])
 fi
 AM_CONDITIONAL(GLAMOR, test x$GLAMOR != xno)
-
-AC_CHECK_DECL(RegionDuplicate,
-	      [AC_DEFINE(HAVE_REGIONDUPLICATE, 1,
-	      [Have RegionDuplicate API])], [],
-	      [#include <xorg-server.h>
-	       #include <regionstr.h>])
-
-AC_CHECK_DECL(fbGlyphs,
-	      [AC_DEFINE(HAVE_FBGLYPHS, 1, [Have fbGlyphs API])], [],
-	      [#include <X11/Xmd.h>
-	       #include <X11/Xfuncproto.h>
-	       #include <X11/extensions/renderproto.h>
-	       #include <xorg-server.h>
-	       #include <picture.h>
-	       #include <glyphstr.h>
-	       #include <fbpict.h>])
-
-AC_CHECK_DECL(xf86CursorResetCursor,
-	      [AC_DEFINE(HAVE_XF86_CURSOR_RESET_CURSOR, 1,
-	      [Have xf86CursorResetCursor API])], [],
-	      [#include <xorg-server.h>
-	       #include <xf86Cursor.h>])
-
-AC_CHECK_DECL(GBM_BO_USE_LINEAR,
-	      [AC_DEFINE(HAVE_GBM_BO_USE_LINEAR, 1, [Have GBM_BO_USE_LINEAR])], [],
-	      [#include <stdlib.h>
-	       #include <gbm.h>])
-
-AC_CHECK_HEADERS([misyncshm.h], [], [],
-                 [#include <X11/Xdefs.h>
-	          #include <X11/Xfuncproto.h>
-	          #include <xorg-server.h>
-		  #include <screenint.h>])
-
-AC_CHECK_HEADERS([present.h], [], [],
-		 [#include <X11/Xmd.h>
-		 #include <X11/Xproto.h>
-		 #include "xorg-server.h"
-		 #include <X11/X.h>])
-
-AC_CHECK_HEADERS([dri3.h], [], [],
-		 [#include <X11/Xmd.h>
-		 #include <xorg-server.h>])
 
 CPPFLAGS="$SAVE_CPPFLAGS"
 

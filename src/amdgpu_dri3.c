@@ -20,15 +20,10 @@
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE
  * OF THIS SOFTWARE.
  */
-
-
-#ifdef HAVE_CONFIG_H
 #include "config.h"
-#endif
+#include <xorg-server.h>
 
 #include "amdgpu_drv.h"
-
-#ifdef HAVE_DRI3_H
 
 #include "amdgpu_glamor.h"
 #include "amdgpu_pixmap.h"
@@ -116,38 +111,6 @@ amdgpu_dri3_open(ScreenPtr screen, RRProviderPtr provider, int *out)
 
 	return ret;
 }
-
-#if DRI3_SCREEN_INFO_VERSION >= 1 && XORG_VERSION_CURRENT <= XORG_VERSION_NUMERIC(1,18,99,1,0)
-
-static int
-amdgpu_dri3_open_client(ClientPtr client, ScreenPtr screen,
-			RRProviderPtr provider, int *out)
-{
-	const char *cmdname = GetClientCmdName(client);
-	Bool is_ssh = FALSE;
-
-	/* If the executable name is "ssh", assume that this client connection
-	 * is forwarded from another host via SSH
-	 */
-	if (cmdname) {
-		char *cmd = strdup(cmdname);
-
-		/* Cut off any colon and whatever comes after it, see
-		 * https://lists.freedesktop.org/archives/xorg-devel/2015-December/048164.html
-		 */
-		cmd = strtok(cmd, ":");
-
-		is_ssh = strcmp(basename(cmd), "ssh") == 0;
-		free(cmd);
-	}
-
-	if (!is_ssh)
-		return amdgpu_dri3_open(screen, provider, out);
-
-	return BadAccess;
-}
-
-#endif /* DRI3_SCREEN_INFO_VERSION >= 1 && XORG_VERSION_CURRENT <= XORG_VERSION_NUMERIC(1,18,99,1,0) */
 
 static PixmapPtr amdgpu_dri3_pixmap_from_fd(ScreenPtr screen,
 					    int fd,
@@ -254,13 +217,8 @@ static int amdgpu_dri3_fd_from_pixmap(ScreenPtr screen,
 }
 
 static dri3_screen_info_rec amdgpu_dri3_screen_info = {
-#if DRI3_SCREEN_INFO_VERSION >= 1 && XORG_VERSION_CURRENT <= XORG_VERSION_NUMERIC(1,18,99,1,0)
-	.version = 1,
-	.open_client = amdgpu_dri3_open_client,
-#else
 	.version = 0,
 	.open = amdgpu_dri3_open,
-#endif
 	.pixmap_from_fd = amdgpu_dri3_pixmap_from_fd,
 	.fd_from_pixmap = amdgpu_dri3_fd_from_pixmap
 };
@@ -281,17 +239,3 @@ amdgpu_dri3_screen_init(ScreenPtr screen)
 
 	return TRUE;
 }
-
-#else /* !HAVE_DRI3_H */
-
-Bool
-amdgpu_dri3_screen_init(ScreenPtr screen)
-{
-	xf86DrvMsg(xf86ScreenToScrn(screen)->scrnIndex, X_INFO,
-		   "Can't initialize DRI3 because dri3.h not available at "
-		   "build time\n");
-
-	return FALSE;
-}
-
-#endif
