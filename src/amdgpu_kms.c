@@ -24,12 +24,14 @@
  *    Dave Airlie <airlied@redhat.com>
  *
  */
-#ifdef HAVE_CONFIG_H
 #include "config.h"
-#endif
+#include <xorg-server.h>
 
 #include <errno.h>
 #include <sys/ioctl.h>
+
+#include "fb.h"
+
 /* Driver data structures */
 #include "amdgpu_drv.h"
 #include "amdgpu_bo_helper.h"
@@ -43,18 +45,9 @@
 #include "shadow.h"
 #include <xf86Priv.h>
 
-#if HAVE_PRESENT_H
 #include <present.h>
-#endif
 
-/* DPMS */
-#ifdef HAVE_XEXTPROTO_71
 #include <X11/extensions/dpmsconst.h>
-#else
-#define DPMS_SERVER
-#include <X11/extensions/dpms.h>
-#endif
-
 #include <X11/extensions/damageproto.h>
 
 #include "amdgpu_bo_helper.h"
@@ -75,20 +68,20 @@ static int (*saved_delete_property) (ClientPtr client);
 static Bool amdgpu_setup_kernel_mem(ScreenPtr pScreen);
 
 const OptionInfoRec AMDGPUOptions_KMS[] = {
-	{OPTION_ACCEL, "Accel", OPTV_BOOLEAN, {0}, FALSE},
-	{OPTION_SW_CURSOR, "SWcursor", OPTV_BOOLEAN, {0}, FALSE},
-	{OPTION_PAGE_FLIP, "EnablePageFlip", OPTV_BOOLEAN, {0}, FALSE},
-	{OPTION_SUBPIXEL_ORDER, "SubPixelOrder", OPTV_ANYSTR, {0}, FALSE},
-	{OPTION_ZAPHOD_HEADS, "ZaphodHeads", OPTV_STRING, {0}, FALSE},
-	{OPTION_ACCEL_METHOD, "AccelMethod", OPTV_STRING, {0}, FALSE},
-	{OPTION_DRI3, "DRI3", OPTV_BOOLEAN, {0}, FALSE},
-	{OPTION_DRI, "DRI", OPTV_INTEGER, {0}, FALSE},
-	{OPTION_SHADOW_PRIMARY, "ShadowPrimary", OPTV_BOOLEAN, {0}, FALSE},
-	{OPTION_TEAR_FREE, "TearFree", OPTV_BOOLEAN, {0}, FALSE},
-	{OPTION_DELETE_DP12, "DeleteUnusedDP12Displays", OPTV_BOOLEAN, {0}, FALSE},
-	{OPTION_VARIABLE_REFRESH, "VariableRefresh", OPTV_BOOLEAN, {0}, FALSE },
-	{OPTION_ASYNC_FLIP_SECONDARIES, "AsyncFlipSecondaries", OPTV_BOOLEAN, {0}, FALSE},
-	{-1, NULL, OPTV_NONE, {0}, FALSE}
+	{OPTION_ACCEL, "Accel", OPTV_BOOLEAN, .value = {0}, FALSE},
+	{OPTION_SW_CURSOR, "SWcursor", OPTV_BOOLEAN, .value = {0}, FALSE},
+	{OPTION_PAGE_FLIP, "EnablePageFlip", OPTV_BOOLEAN, .value = {0}, FALSE},
+	{OPTION_SUBPIXEL_ORDER, "SubPixelOrder", OPTV_ANYSTR, .value = {0}, FALSE},
+	{OPTION_ZAPHOD_HEADS, "ZaphodHeads", OPTV_STRING, .value = {0}, FALSE},
+	{OPTION_ACCEL_METHOD, "AccelMethod", OPTV_STRING, .value = {0}, FALSE},
+	{OPTION_DRI3, "DRI3", OPTV_BOOLEAN, .value = {0}, FALSE},
+	{OPTION_DRI, "DRI", OPTV_INTEGER, .value = {0}, FALSE},
+	{OPTION_SHADOW_PRIMARY, "ShadowPrimary", OPTV_BOOLEAN, .value = {0}, FALSE},
+	{OPTION_TEAR_FREE, "TearFree", OPTV_BOOLEAN, .value = {0}, FALSE},
+	{OPTION_DELETE_DP12, "DeleteUnusedDP12Displays", OPTV_BOOLEAN, .value = {0}, FALSE},
+	{OPTION_VARIABLE_REFRESH, "VariableRefresh", OPTV_BOOLEAN, .value = {0}, FALSE },
+	{OPTION_ASYNC_FLIP_SECONDARIES, "AsyncFlipSecondaries", OPTV_BOOLEAN, .value = {0}, FALSE},
+	{-1, NULL, OPTV_NONE, .value = {0}, FALSE}
 };
 
 const OptionInfoRec *AMDGPUOptionsWeak(void)
@@ -224,18 +217,11 @@ amdgpu_unwrap_property_requests(ScrnInfoPtr scrn)
 	amdgpu_property_vectors_wrapped = FALSE;
 }
 
-extern _X_EXPORT int gAMDGPUEntityIndex;
-
-static int getAMDGPUEntityIndex(void)
-{
-	return gAMDGPUEntityIndex;
-}
-
 AMDGPUEntPtr AMDGPUEntPriv(ScrnInfoPtr pScrn)
 {
 	DevUnion *pPriv;
 	AMDGPUInfoPtr info = AMDGPUPTR(pScrn);
-	pPriv = xf86GetEntityPrivate(info->pEnt->index, getAMDGPUEntityIndex());
+	pPriv = xf86GetEntityPrivate(info->pEnt->index, gAMDGPUEntityIndex);
 	return pPriv->ptr;
 }
 
@@ -245,7 +231,7 @@ static Bool AMDGPUGetRec(ScrnInfoPtr pScrn)
 	if (pScrn->driverPrivate)
 		return TRUE;
 
-	pScrn->driverPrivate = xnfcalloc(sizeof(AMDGPUInfoRec), 1);
+	pScrn->driverPrivate = XNFcallocarray(sizeof(AMDGPUInfoRec), 1);
 	return TRUE;
 }
 
@@ -273,10 +259,8 @@ static void AMDGPUFreeRec(ScrnInfoPtr pScrn)
 	}
 
 	if (pAMDGPUEnt->fd > 0) {
-		DevUnion *pPriv;
-		AMDGPUEntPtr pAMDGPUEnt;
 		pPriv = xf86GetEntityPrivate(pScrn->entityList[0],
-					     getAMDGPUEntityIndex());
+					     gAMDGPUEntityIndex);
 
 		pAMDGPUEnt = pPriv->ptr;
 		pAMDGPUEnt->fd_ref--;
@@ -326,7 +310,7 @@ callback_needs_flush(AMDGPUInfoPtr info, struct amdgpu_client_priv *client_priv)
 
 static void
 amdgpu_event_callback(CallbackListPtr *list,
-		      pointer user_data, pointer call_data)
+		      void* user_data, void* call_data)
 {
 	EventInfoRec *eventinfo = call_data;
 	ScrnInfoPtr pScrn = user_data;
@@ -349,7 +333,7 @@ amdgpu_event_callback(CallbackListPtr *list,
 	 */
 	client_priv->needs_flush = info->gpu_flushed;
 	server_priv->needs_flush = info->gpu_flushed;
-	
+
 	for (i = 0; i < eventinfo->count; i++) {
 		if (eventinfo->events[i].u.u.type == info->callback_event_type) {
 			client_priv->needs_flush++;
@@ -361,7 +345,7 @@ amdgpu_event_callback(CallbackListPtr *list,
 
 static void
 amdgpu_flush_callback(CallbackListPtr *list,
-		      pointer user_data, pointer call_data)
+		      void* user_data, void* call_data)
 {
 	ScrnInfoPtr pScrn = user_data;
 	ScreenPtr pScreen = pScrn->pScreen;
@@ -479,7 +463,7 @@ amdgpu_scanout_extents_intersect(xf86CrtcPtr xf86_crtc, BoxPtr extents)
 }
 
 static RegionPtr
-transform_region(RegionPtr region, struct pict_f_transform *transform,
+transform_region(RegionPtr region, struct pixman_f_transform *transform,
 		 int w, int h)
 {
 	BoxPtr boxes = RegionRects(region);
@@ -601,14 +585,12 @@ dirty_region(PixmapDirtyUpdatePtr dirty)
 	RegionPtr damageregion = DamageRegion(dirty->damage);
 	RegionPtr dstregion;
 
-#ifdef HAS_DIRTYTRACKING_ROTATION
 	if (dirty->rotation != RR_Rotate_0) {
 		dstregion = transform_region(damageregion,
 					     &dirty->f_inverse,
 					     dirty->secondary_dst->drawable.width,
 					     dirty->secondary_dst->drawable.height);
 	} else
-#endif
 	{
 		RegionRec pixregion;
 
@@ -634,11 +616,7 @@ redisplay_dirty(PixmapDirtyUpdatePtr dirty, RegionPtr region)
 	if (dirty->secondary_dst->primary_pixmap)
 		DamageRegionAppend(&dirty->secondary_dst->drawable, region);
 
-#ifdef HAS_DIRTYTRACKING_ROTATION
 	PixmapSyncDirtyHelper(dirty);
-#else
-	PixmapSyncDirtyHelper(dirty, region);
-#endif
 
 	amdgpu_glamor_flush(src_scrn);
 	if (dirty->secondary_dst->primary_pixmap)
@@ -656,7 +634,7 @@ amdgpu_prime_scanout_update_abort(xf86CrtcPtr crtc, void *event_data)
 	drmmode_crtc->scanout_update_pending = 0;
 }
 
-void
+static void
 amdgpu_sync_shared_pixmap(PixmapDirtyUpdatePtr dirty)
 {
 	ScreenPtr primary_screen = amdgpu_dirty_primary(dirty);
@@ -672,9 +650,6 @@ amdgpu_sync_shared_pixmap(PixmapDirtyUpdatePtr dirty)
 		RegionDestroy(region);
 	}
 }
-
-
-#if HAS_SYNC_SHARED_PIXMAP
 
 static Bool
 primary_has_sync_shared_pixmap(ScrnInfoPtr scrn, PixmapDirtyUpdatePtr dirty)
@@ -699,33 +674,6 @@ call_sync_shared_pixmap(PixmapDirtyUpdatePtr dirty)
 
 	primary_screen->SyncSharedPixmap(dirty);
 }
-
-#else /* !HAS_SYNC_SHARED_PIXMAP */
-
-static Bool
-primary_has_sync_shared_pixmap(ScrnInfoPtr scrn, PixmapDirtyUpdatePtr dirty)
-{
-	ScrnInfoPtr primary_scrn = xf86ScreenToScrn(amdgpu_dirty_primary(dirty));
-
-	return primary_scrn->driverName == scrn->driverName;
-}
-
-static Bool
-secondary_has_sync_shared_pixmap(ScrnInfoPtr scrn, PixmapDirtyUpdatePtr dirty)
-{
-	ScrnInfoPtr secondary_scrn = xf86ScreenToScrn(dirty->secondary_dst->drawable.pScreen);
-
-	return secondary_scrn->driverName == scrn->driverName;
-}
-
-static void
-call_sync_shared_pixmap(PixmapDirtyUpdatePtr dirty)
-{
-	amdgpu_sync_shared_pixmap(dirty);
-}
-
-#endif /* HAS_SYNC_SHARED_PIXMAPS */
-
 
 static xf86CrtcPtr
 amdgpu_prime_dirty_to_crtc(PixmapDirtyUpdatePtr dirty)
@@ -892,7 +840,7 @@ amdgpu_prime_scanout_flip(PixmapDirtyUpdatePtr ent)
 			   "Failed to get FB for PRIME flip.\n");
 		return;
 	}
-	
+
 	drm_queue_seq = amdgpu_drm_queue_alloc(crtc,
 					       AMDGPU_DRM_QUEUE_CLIENT_DEFAULT,
 					       AMDGPU_DRM_QUEUE_ID_DEFAULT, fb,
@@ -1277,11 +1225,6 @@ static void AMDGPUBlockHandler_KMS(BLOCKHANDLER_ARGS_DECL)
 		}
 	}
 
-#if XORG_VERSION_CURRENT < XORG_VERSION_NUMERIC(1,19,0,0,0)
-	if (info->use_glamor)
-		amdgpu_glamor_flush(pScrn);
-#endif
-
 	amdgpu_dirty_update(pScrn);
 }
 
@@ -1373,13 +1316,11 @@ static Bool AMDGPUPreInitAccel_KMS(ScrnInfoPtr pScrn)
 	if (xf86ReturnOptValBool(info->Options, OPTION_ACCEL, TRUE)) {
 		AMDGPUEntPtr pAMDGPUEnt = AMDGPUEntPriv(pScrn);
 		Bool use_glamor = TRUE;
-#ifdef HAVE_GBM_BO_USE_LINEAR
 		const char *accel_method;
 
 		accel_method = xf86GetOptValString(info->Options, OPTION_ACCEL_METHOD);
 		if ((accel_method && !strcmp(accel_method, "none")))
 			use_glamor = FALSE;
-#endif
 
 #ifdef DRI2
 		info->dri2.available = ! !xf86LoadSubModule(pScrn, "dri2");
@@ -1521,11 +1462,7 @@ static void amdgpu_determine_cursor_size(int fd, AMDGPUInfoPtr info)
 }
 
 /* When the root window is mapped, set the initial modes */
-void AMDGPUWindowExposures_oneshot(WindowPtr pWin, RegionPtr pRegion
-#if XORG_VERSION_CURRENT < XORG_VERSION_NUMERIC(1,16,99,901,0)
-				   , RegionPtr pBSRegion
-#endif
-				   )
+void AMDGPUWindowExposures_oneshot(WindowPtr pWin, RegionPtr pRegion)
 {
 	ScreenPtr pScreen = pWin->drawable.pScreen;
 	ScrnInfoPtr pScrn = xf86ScreenToScrn(pScreen);
@@ -1535,11 +1472,7 @@ void AMDGPUWindowExposures_oneshot(WindowPtr pWin, RegionPtr pRegion
 		ErrorF("%s called for non-root window %p\n", __func__, pWin);
 
 	pScreen->WindowExposures = info->WindowExposures;
-#if XORG_VERSION_CURRENT < XORG_VERSION_NUMERIC(1,16,99,901,0)
-	pScreen->WindowExposures(pWin, pRegion, pBSRegion);
-#else
 	pScreen->WindowExposures(pWin, pRegion);
-#endif
 
 	amdgpu_glamor_finish(pScrn);
 	drmmode_set_desired_modes(pScrn, &info->drmmode, TRUE);
@@ -1565,7 +1498,7 @@ Bool AMDGPUPreInit_KMS(ScrnInfoPtr pScrn, int flags)
 		return FALSE;
 
 	pAMDGPUEnt = xf86GetEntityPrivate(pScrn->entityList[0],
-					  getAMDGPUEntityIndex())->ptr;
+					  gAMDGPUEntityIndex)->ptr;
 
 	if (!AMDGPUGetRec(pScrn))
 		return FALSE;
@@ -1654,6 +1587,10 @@ Bool AMDGPUPreInit_KMS(ScrnInfoPtr pScrn, int flags)
 		if (!pScrn->is_gpu) {
 			from = xf86GetOptValBool(info->Options, OPTION_VARIABLE_REFRESH,
 						 &info->vrr_support) ? X_CONFIG : X_DEFAULT;
+
+			if (info->vrr_support && !info->tear_free)
+				xf86DrvMsg(pScrn->scrnIndex, X_WARNING,
+					   "Enabling VariableRefresh while TearFree is disabled can cause instability!\n");
 
 			xf86DrvMsg(pScrn->scrnIndex, from, "VariableRefresh: %sabled\n",
 				   info->vrr_support ? "en" : "dis");
@@ -1790,7 +1727,7 @@ static Bool AMDGPUCursorInit_KMS(ScreenPtr pScreen)
 	return TRUE;
 }
 
-void AMDGPUBlank(ScrnInfoPtr pScrn)
+static void AMDGPUBlank(ScrnInfoPtr pScrn)
 {
 	xf86CrtcConfigPtr xf86_config = XF86_CRTC_CONFIG_PTR(pScrn);
 	xf86OutputPtr output;
@@ -1810,7 +1747,7 @@ void AMDGPUBlank(ScrnInfoPtr pScrn)
 	}
 }
 
-void AMDGPUUnblank(ScrnInfoPtr pScrn)
+static void AMDGPUUnblank(ScrnInfoPtr pScrn)
 {
 	xf86CrtcConfigPtr xf86_config = XF86_CRTC_CONFIG_PTR(pScrn);
 	xf86OutputPtr output;
@@ -1835,11 +1772,9 @@ static Bool amdgpu_set_drm_master(ScrnInfoPtr pScrn)
 	AMDGPUEntPtr pAMDGPUEnt = AMDGPUEntPriv(pScrn);
 	int err;
 
-#ifdef XF86_PDEV_SERVER_FD
 	if (pAMDGPUEnt->platform_dev &&
 	    (pAMDGPUEnt->platform_dev->flags & XF86_PDEV_SERVER_FD))
 		return TRUE;
-#endif
 
 	err = drmSetMaster(pAMDGPUEnt->fd);
 	if (err)
@@ -1852,18 +1787,16 @@ static void amdgpu_drop_drm_master(ScrnInfoPtr pScrn)
 {
 	AMDGPUEntPtr pAMDGPUEnt = AMDGPUEntPriv(pScrn);
 
-#ifdef XF86_PDEV_SERVER_FD
 	if (pAMDGPUEnt->platform_dev &&
 	    (pAMDGPUEnt->platform_dev->flags & XF86_PDEV_SERVER_FD))
 		return;
-#endif
 
 	drmDropMaster(pAMDGPUEnt->fd);
 }
 
 
 static
-CARD32 cleanup_black_fb(OsTimerPtr timer, CARD32 now, pointer data)
+CARD32 cleanup_black_fb(OsTimerPtr timer, CARD32 now, void* data)
 {
 	ScreenPtr screen = data;
 	ScrnInfoPtr scrn = xf86ScreenToScrn(screen);
@@ -2059,10 +1992,7 @@ Bool AMDGPUScreenInit_KMS(ScreenPtr pScreen, int argc, char **argv)
 	}
 #endif
 
-	if (xorgGetVersion() >= XORG_VERSION_NUMERIC(1,18,3,0,0))
-		value = info->use_glamor;
-	else
-		value = FALSE;
+	value = info->use_glamor;
 	from = X_DEFAULT;
 
 	if (info->use_glamor) {
@@ -2172,9 +2102,7 @@ Bool AMDGPUScreenInit_KMS(ScreenPtr pScreen, int argc, char **argv)
 
 	pScreen->StartPixmapTracking = PixmapStartDirtyTracking;
 	pScreen->StopPixmapTracking = PixmapStopDirtyTracking;
-#if HAS_SYNC_SHARED_PIXMAP
 	pScreen->SyncSharedPixmap = amdgpu_sync_shared_pixmap;
-#endif
 
 	if (!xf86CrtcScreenInit(pScreen))
 		return FALSE;
@@ -2348,8 +2276,7 @@ void AMDGPULeaveVT_KMS(ScrnInfoPtr pScrn)
 						}
 					}
 				}
-
-				pScreen->DestroyPixmap(black_scanout);
+				dixDestroyPixmap(black_scanout, 0);
 			}
 		}
 
@@ -2436,7 +2363,7 @@ static Bool amdgpu_setup_kernel_mem(ScreenPtr pScreen)
 
 	if (!info->front_buffer) {
 		int pitch;
-		int hint = AMDGPU_CREATE_PIXMAP_SCANOUT;
+		int hint = AMDGPU_CREATE_PIXMAP_SCANOUT | AMDGPU_CREATE_PIXMAP_FRONT;
 
 		if (info->shadow_primary)
 			hint |= AMDGPU_CREATE_PIXMAP_LINEAR | AMDGPU_CREATE_PIXMAP_GTT;

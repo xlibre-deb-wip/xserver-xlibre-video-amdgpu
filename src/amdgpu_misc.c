@@ -19,10 +19,8 @@
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
  */
-
-#ifdef HAVE_CONFIG_H
 #include "config.h"
-#endif
+#include <xorg-server.h>
 
 #include "amdgpu_probe.h"
 #include "amdgpu_version.h"
@@ -49,8 +47,7 @@ static XF86ModuleVersionInfo AMDGPUVersionRec = {
  *
  * This function is called every time the module is loaded.
  */
-static pointer
-AMDGPUSetup(pointer Module, pointer Options, int *ErrorMajor, int *ErrorMinor)
+static void *AMDGPUSetup(void* Module, void* Options, int *ErrorMajor, int *ErrorMinor)
 {
 	static Bool Inited = FALSE;
 
@@ -59,7 +56,7 @@ AMDGPUSetup(pointer Module, pointer Options, int *ErrorMajor, int *ErrorMinor)
 		xf86AddDriver(&AMDGPU, Module, HaveDriverFuncs);
 	}
 
-	return (pointer) TRUE;
+	return (void*) TRUE;
 }
 
 /* The following record must be called amdgpuModuleData */

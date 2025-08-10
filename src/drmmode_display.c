@@ -24,10 +24,8 @@
  *    Dave Airlie <airlied@redhat.com>
  *
  */
-
-#ifdef HAVE_CONFIG_H
 #include "config.h"
-#endif
+#include <xorg-server.h>
 
 #include <errno.h>
 #include <sys/ioctl.h>
@@ -47,13 +45,7 @@
 #include "amdgpu_glamor.h"
 #include "amdgpu_pixmap.h"
 
-/* DPMS */
-#ifdef HAVE_XEXTPROTO_71
 #include <X11/extensions/dpmsconst.h>
-#else
-#define DPMS_SERVER
-#include <X11/extensions/dpms.h>
-#endif
 
 #include <gbm.h>
 
@@ -402,7 +394,7 @@ create_pixmap_for_fbcon(drmmode_ptr drmmode,
 
 	if (!glamor_egl_create_textured_pixmap(pixmap, fbcon->handle,
 					       pixmap->devKind)) {
-		pScreen->DestroyPixmap(pixmap);
+		dixDestroyPixmap(pixmap, 0);
 		pixmap = NULL;
 	}
 
@@ -460,7 +452,7 @@ void drmmode_copy_fb(ScrnInfoPtr pScrn, drmmode_ptr drmmode)
 	FreeScratchGC(gc);
 
 	pScreen->canDoBGNoneRoot = TRUE;
-	pScreen->DestroyPixmap(src);
+	dixDestroyPixmap(src, 0);
 #endif
 
 	return;
@@ -509,7 +501,7 @@ drmmode_crtc_scanout_create(xf86CrtcPtr crtc, PixmapPtr *scanout,
 
 	if (!amdgpu_pixmap_get_fb(*scanout)) {
 		ErrorF("failed to create CRTC scanout FB\n");
-error:		
+error:
 		drmmode_crtc_scanout_destroy(scanout);
 		return FALSE;
 	}
@@ -555,20 +547,6 @@ drmmode_can_use_hw_cursor(xf86CrtcPtr crtc)
 	if (crtc->transformPresent)
 		return FALSE;
 
-#if XF86_CRTC_VERSION < 7
-	/* Xorg doesn't correctly handle cursor position transform in the
-	 * rotation case
-	 */
-	if (crtc->driverIsPerformingTransform &&
-	    (crtc->rotation & 0xf) != RR_Rotate_0)
-		return FALSE;
-#endif
-
-	/* HW cursor not supported with RandR 1.4 multihead up to 1.18.99.901 */
-	if (xorgGetVersion() <= XORG_VERSION_NUMERIC(1,18,99,901,0) &&
-	    !xorg_list_is_empty(&crtc->scrn->pScreen->pixmap_dirty_list))
-		return FALSE;
-
 	return TRUE;
 }
 
@@ -593,6 +571,7 @@ drmmode_crtc_update_tear_free(xf86CrtcPtr crtc)
 		    (drmmode_output->tear_free == 2 &&
 		     (crtc->scrn->pScreen->isGPU ||
 		      info->shadow_primary ||
+		      info->vrr_support ||
 		      crtc->transformPresent || crtc->rotation != RR_Rotate_0))) {
 			drmmode_crtc->tear_free = TRUE;
 			return;
@@ -600,22 +579,12 @@ drmmode_crtc_update_tear_free(xf86CrtcPtr crtc)
 	}
 }
 
-#if XF86_CRTC_VERSION < 7
-#define XF86DriverTransformOutput TRUE
-#define XF86DriverTransformNone FALSE
-#endif
-
 static Bool
 drmmode_handle_transform(xf86CrtcPtr crtc)
 {
 	Bool ret;
 
-#if XORG_VERSION_CURRENT >= XORG_VERSION_NUMERIC(1,15,99,903,0)
 	crtc->driverIsPerformingTransform = XF86DriverTransformOutput;
-#else
-	crtc->driverIsPerformingTransform = !crtc->transformPresent &&
-		(crtc->rotation & 0xf) == RR_Rotate_0;
-#endif
 
 	ret = xf86CrtcRotate(crtc);
 
@@ -680,7 +649,7 @@ drmmode_crtc_prime_scanout_update(xf86CrtcPtr crtc, DisplayModePtr mode,
 	*x = *y = 0;
 	drmmode_crtc->scanout_id = scanout_id;
 }
-	
+
 
 static void
 drmmode_crtc_scanout_update(xf86CrtcPtr crtc, DisplayModePtr mode,
@@ -833,8 +802,8 @@ static void drmmode_lut_compose(uint16_t *a_red,
 			 * values in the LUTs are [0, 1<<16)
 			 */
 			j = a_out_ibmax / max_lut;
-			*(uint16_t*)((void*)out + (i*struct_size)) =
-				*(uint16_t*)((void*)b + (j*struct_size));
+			*(uint16_t*)((char*)out + (i*struct_size)) =
+				*(uint16_t*)((char*)b + (j*struct_size));
 		}
 	}
 
@@ -1122,6 +1091,10 @@ static int drmmode_crtc_push_cm_prop(xf86CrtcPtr crtc,
 	void *blob_data = NULL;
 	int ret;
 
+	if (!drmmode_cm_prop_supported(drmmode, cm_prop_index)) {
+		return BadName;
+	}
+
 	switch (cm_prop_index) {
 	case CM_GAMMA_LUT:
 		/* Calculate the expected size of value in bytes */
@@ -1226,7 +1199,7 @@ drmmode_crtc_gamma_do_set(xf86CrtcPtr crtc, uint16_t *red, uint16_t *green,
 	int ret;
 
 	/* Use legacy if no support for non-legacy gamma */
-	if (!drmmode_cm_enabled(drmmode_crtc->drmmode)) {
+	if (!drmmode_cm_prop_supported(drmmode_crtc->drmmode, CM_GAMMA_LUT)) {
 		drmModeCrtcSetGamma(pAMDGPUEnt->fd,
 				    drmmode_crtc->mode_crtc->crtc_id,
 				    size, red, green, blue);
@@ -1264,6 +1237,11 @@ drmmode_set_mode(xf86CrtcPtr crtc, struct drmmode_fb *fb, DisplayModePtr mode,
 		if (output->crtc != crtc)
 			continue;
 
+		if (!drmmode_output->mode_output) {
+			ret = FALSE;
+			goto out;
+		}
+
 		output_ids[output_count] = drmmode_output->mode_output->connector_id;
 		output_count++;
 	}
@@ -1282,6 +1260,7 @@ drmmode_set_mode(xf86CrtcPtr crtc, struct drmmode_fb *fb, DisplayModePtr mode,
 			   "failed to set mode: %s\n", strerror(errno));
 	}
 
+out:
 	free(output_ids);
 	return ret;
 }
@@ -1402,11 +1381,6 @@ drmmode_set_mode_major(xf86CrtcPtr crtc, DisplayModePtr mode,
 		break;
 	}
 
-#ifndef HAVE_XF86_CURSOR_RESET_CURSOR
-	if (!info->hwcursor_disabled)
-		xf86_reload_cursors(pScreen);
-#endif
-
 done:
 	if (!ret) {
 		crtc->x = saved_x;
@@ -1440,54 +1414,11 @@ static void drmmode_set_cursor_position(xf86CrtcPtr crtc, int x, int y)
 	drmmode_crtc_private_ptr drmmode_crtc = crtc->driver_private;
 	AMDGPUEntPtr pAMDGPUEnt = AMDGPUEntPriv(crtc->scrn);
 
-#if XF86_CRTC_VERSION < 7
-	if (crtc->driverIsPerformingTransform) {
-		x += crtc->x;
-		y += crtc->y;
-		xf86CrtcTransformCursorPos(crtc, &x, &y);
-	}
-#endif
-
 	drmmode_crtc->cursor_x = x;
 	drmmode_crtc->cursor_y = y;
 
 	drmModeMoveCursor(pAMDGPUEnt->fd, drmmode_crtc->mode_crtc->crtc_id, x, y);
 }
-
-#if XF86_CRTC_VERSION < 7
-
-static int
-drmmode_cursor_src_offset(Rotation rotation, int width, int height,
-			  int x_dst, int y_dst)
-{
-	int t;
-
-	switch (rotation & 0xf) {
-	case RR_Rotate_90:
-		t = x_dst;
-		x_dst = height - y_dst - 1;
-		y_dst = t;
-		break;
-	case RR_Rotate_180:
-		x_dst = width - x_dst - 1;
-		y_dst = height - y_dst - 1;
-		break;
-	case RR_Rotate_270:
-		t = x_dst;
-		x_dst = y_dst;
-		y_dst = width - t - 1;
-		break;
-	}
-
-	if (rotation & RR_Reflect_X)
-		x_dst = width - x_dst - 1;
-	if (rotation & RR_Reflect_Y)
-		y_dst = height - y_dst - 1;
-
-	return y_dst * height + x_dst;
-}
-
-#endif
 
 static Bool
 drmmode_cursor_pixel(xf86CrtcPtr crtc, uint32_t *argb, Bool *premultiplied,
@@ -1498,14 +1429,6 @@ drmmode_cursor_pixel(xf86CrtcPtr crtc, uint32_t *argb, Bool *premultiplied,
 	int i;
 
 	if (premultiplied) {
-#if XORG_VERSION_CURRENT < XORG_VERSION_NUMERIC(1, 18, 4, 0, 0)
-		if (alpha == 0 && (*argb & 0xffffff) != 0) {
-			/* Doesn't look like premultiplied alpha */
-			*premultiplied = FALSE;
-			return FALSE;
-		}
-#endif
-
 		if (!(*apply_gamma))
 			return TRUE;
 
@@ -1559,7 +1482,7 @@ static void drmmode_load_cursor_argb(xf86CrtcPtr crtc, CARD32 * image)
 	uint32_t *ptr;
 
 	if ((crtc->scrn->depth != 24 && crtc->scrn->depth != 32) ||
-	    drmmode_cm_enabled(&info->drmmode))
+	    drmmode_cm_prop_supported(&info->drmmode, CM_GAMMA_LUT))
 		apply_gamma = FALSE;
 
 	if (drmmode_crtc->cursor &&
@@ -1568,29 +1491,6 @@ static void drmmode_load_cursor_argb(xf86CrtcPtr crtc, CARD32 * image)
 
 	ptr = (uint32_t *) (drmmode_crtc->cursor_buffer[id]->cpu_ptr);
 
-#if XF86_CRTC_VERSION < 7
-	if (crtc->driverIsPerformingTransform) {
-		uint32_t cursor_w = info->cursor_w, cursor_h = info->cursor_h;
-		int dstx, dsty;
-		int srcoffset;
-
-retry_transform:
-		for (dsty = 0; dsty < cursor_h; dsty++) {
-			for (dstx = 0; dstx < cursor_w; dstx++) {
-				srcoffset = drmmode_cursor_src_offset(crtc->rotation,
-								      cursor_w,
-								      cursor_h,
-								      dstx, dsty);
-				argb = image[srcoffset];
-				if (!drmmode_cursor_pixel(crtc, &argb, &premultiplied,
-							  &apply_gamma))
-					goto retry_transform;
-
-				ptr[dsty * info->cursor_w + dstx] = cpu_to_le32(argb);
-			}
-		}
-	} else
-#endif
 	{
 		uint32_t cursor_size = info->cursor_w * info->cursor_h;
 		int i;
@@ -1612,8 +1512,6 @@ retry:
 	}
 }
 
-#if XORG_VERSION_CURRENT >= XORG_VERSION_NUMERIC(1,15,99,903,0)
-
 static Bool drmmode_load_cursor_argb_check(xf86CrtcPtr crtc, CARD32 * image)
 {
 	if (!drmmode_can_use_hw_cursor(crtc))
@@ -1622,8 +1520,6 @@ static Bool drmmode_load_cursor_argb_check(xf86CrtcPtr crtc, CARD32 * image)
 	drmmode_load_cursor_argb(crtc, image);
 	return TRUE;
 }
-
-#endif
 
 static void drmmode_hide_cursor(xf86CrtcPtr crtc)
 {
@@ -1773,11 +1669,7 @@ drmmode_crtc_gamma_set(xf86CrtcPtr crtc, uint16_t * red, uint16_t * green,
 	if (info->hwcursor_disabled & (1 << i))
 		return;
 
-#ifdef HAVE_XF86_CURSOR_RESET_CURSOR
 	xf86CursorResetCursor(scrn->pScreen);
-#else
-	xf86_reload_cursors(scrn->pScreen);
-#endif
 }
 
 static Bool drmmode_set_scanout_pixmap(xf86CrtcPtr crtc, PixmapPtr ppix)
@@ -1815,19 +1707,9 @@ static Bool drmmode_set_scanout_pixmap(xf86CrtcPtr crtc, PixmapPtr ppix)
 
 	drmmode_crtc->prime_scanout_pixmap = ppix;
 
-#ifdef HAS_DIRTYTRACKING_DRAWABLE_SRC
 	PixmapStartDirtyTracking(&ppix->drawable,
 				 drmmode_crtc->scanout[scanout_id],
 				 0, 0, 0, 0, RR_Rotate_0);
-#elif defined(HAS_DIRTYTRACKING_ROTATION)
-	PixmapStartDirtyTracking(ppix, drmmode_crtc->scanout[scanout_id],
-				 0, 0, 0, 0, RR_Rotate_0);
-#elif defined(HAS_DIRTYTRACKING2)
-	PixmapStartDirtyTracking2(ppix, drmmode_crtc->scanout[scanout_id],
-				  0, 0, 0, 0);
-#else
-	PixmapStartDirtyTracking(ppix, drmmode_crtc->scanout[scanout_id], 0, 0);
-#endif
 	return TRUE;
 }
 
@@ -1840,7 +1722,8 @@ static void drmmode_crtc_destroy(xf86CrtcPtr crtc)
 	/* Free LUTs and CTM */
 	free(drmmode_crtc->gamma_lut);
 	free(drmmode_crtc->degamma_lut);
-	free(drmmode_crtc->ctm);
+	if (drmmode_crtc->ctm != NULL)
+		free(drmmode_crtc->ctm);
 
 	free(drmmode_crtc);
 	crtc->driver_private = NULL;
@@ -1855,10 +1738,7 @@ static xf86CrtcFuncsRec drmmode_crtc_funcs = {
 	.show_cursor = drmmode_show_cursor,
 	.hide_cursor = drmmode_hide_cursor,
 	.load_cursor_argb = drmmode_load_cursor_argb,
-#if XORG_VERSION_CURRENT >= XORG_VERSION_NUMERIC(1,15,99,903,0)
 	.load_cursor_argb_check = drmmode_load_cursor_argb_check,
-#endif
-
 	.gamma_set = drmmode_crtc_gamma_set,
 	.shadow_create = drmmode_crtc_shadow_create,
 	.shadow_allocate = drmmode_crtc_shadow_allocate,
@@ -1873,7 +1753,7 @@ int drmmode_get_crtc_id(xf86CrtcPtr crtc)
 	return drmmode_crtc->hw_id;
 }
 
-void drmmode_crtc_hw_id(xf86CrtcPtr crtc)
+static void drmmode_crtc_hw_id(xf86CrtcPtr crtc)
 {
 	drmmode_crtc_private_ptr drmmode_crtc = crtc->driver_private;
 	ScrnInfoPtr pScrn = crtc->scrn;
@@ -1901,26 +1781,24 @@ void drmmode_crtc_hw_id(xf86CrtcPtr crtc)
 static void drmmode_crtc_cm_init(int drm_fd, xf86CrtcPtr crtc)
 {
 	drmmode_crtc_private_ptr drmmode_crtc = crtc->driver_private;
-	drmmode_ptr drmmode = drmmode_crtc->drmmode;
 	int i;
 
-	if (!drmmode_cm_enabled(drmmode))
-		return;
-
 	/* Init CTM to identity. Values are in S31.32 fixed-point format */
-	drmmode_crtc->ctm = calloc(1, sizeof(*drmmode_crtc->ctm));
-	if (!drmmode_crtc->ctm) {
-		xf86DrvMsg(crtc->scrn->scrnIndex, X_ERROR,
-			   "Memory error initializing CTM for CRTC%d",
-			   drmmode_get_crtc_id(crtc));
-		return;
+	if (drmmode_cm_prop_supported(drmmode_crtc->drmmode, CM_CTM)) {
+		drmmode_crtc->ctm = calloc(1, sizeof(*drmmode_crtc->ctm));
+		if (!drmmode_crtc->ctm) {
+			xf86DrvMsg(crtc->scrn->scrnIndex, X_ERROR,
+				"Memory error initializing CTM for CRTC%d",
+				drmmode_get_crtc_id(crtc));
+			return;
+		}
+
+		drmmode_crtc->ctm->matrix[0] = drmmode_crtc->ctm->matrix[4] =
+			drmmode_crtc->ctm->matrix[8] = (uint64_t)1 << 32;
 	}
 
-	drmmode_crtc->ctm->matrix[0] = drmmode_crtc->ctm->matrix[4] =
-		drmmode_crtc->ctm->matrix[8] = (uint64_t)1 << 32;
-
 	/* Push properties to reset properties currently in hardware */
-	for (i = 0; i < CM_GAMMA_LUT; i++) {
+	for (i = CM_DEGAMMA_LUT; i <= CM_GAMMA_LUT; i++) {
 		if (drmmode_crtc_push_cm_prop(crtc, i))
 			xf86DrvMsg(crtc->scrn->scrnIndex, X_ERROR,
 				   "Failed to initialize color management "
@@ -1943,7 +1821,7 @@ drmmode_crtc_init(ScrnInfoPtr pScrn, drmmode_ptr drmmode, drmModeResPtr mode_res
 	if (!crtc)
 		return 0;
 
-	drmmode_crtc = xnfcalloc(sizeof(drmmode_crtc_private_rec), 1);
+	drmmode_crtc = XNFcallocarray(sizeof(drmmode_crtc_private_rec), 1);
 	drmmode_crtc->mode_crtc =
 	    drmModeGetCrtc(pAMDGPUEnt->fd, mode_res->crtcs[num]);
 	drmmode_crtc->drmmode = drmmode;
@@ -2069,7 +1947,6 @@ drmmode_output_mode_valid(xf86OutputPtr output, DisplayModePtr pModes)
 static void
 drmmode_output_attach_tile(xf86OutputPtr output)
 {
-#if XORG_VERSION_CURRENT >= XORG_VERSION_NUMERIC(1, 17, 99, 901, 0)
 	drmmode_output_private_ptr drmmode_output = output->driver_private;
 	drmModeConnectorPtr koutput = drmmode_output->mode_output;
 	AMDGPUEntPtr pAMDGPUEnt = AMDGPUEntPriv(output->scrn);
@@ -2108,7 +1985,6 @@ drmmode_output_attach_tile(xf86OutputPtr output)
 			set = &tile_info;
 	}
 	xf86OutputSetTile(output, set);
-#endif
 }
 
 static int
@@ -2186,7 +2062,7 @@ static DisplayModePtr drmmode_output_get_modes(xf86OutputPtr output)
 
 	/* modes should already be available */
 	for (i = 0; i < koutput->count_modes; i++) {
-		Mode = xnfalloc(sizeof(DisplayModeRec));
+		Mode = XNFalloc(sizeof(DisplayModeRec));
 
 		drmmode_ConvertFromKMode(output->scrn, &koutput->modes[i],
 					 Mode);
@@ -2202,9 +2078,7 @@ static void drmmode_output_destroy(xf86OutputPtr output)
 	int i;
 
 	drmModeFreePropertyBlob(drmmode_output->edid_blob);
-#if XORG_VERSION_CURRENT >= XORG_VERSION_NUMERIC(1, 17, 99, 901, 0)
 	drmModeFreePropertyBlob(drmmode_output->tile_blob);
-#endif
 
 	for (i = 0; i < drmmode_output->num_props; i++) {
 		drmModeFreeProperty(drmmode_output->props[i].mode_prop);
@@ -2412,14 +2286,13 @@ static void drmmode_output_create_resources(xf86OutputPtr output)
 		}
 	}
 
-	/* Do not configure cm properties on output if there's no support. */
-	if (!drmmode_cm_enabled(drmmode_output->drmmode))
-		return;
-
 	drmmode_crtc = output->crtc ? output->crtc->driver_private : NULL;
 
-	for (i = 0; i < CM_NUM_PROPS; i++)
-		rr_configure_and_change_cm_property(output, drmmode_crtc, i);
+	for (i = 0; i < CM_NUM_PROPS; i++) {
+		if (drmmode_cm_prop_supported(drmmode_output->drmmode ,i))
+			rr_configure_and_change_cm_property(output,
+							    drmmode_crtc, i);
+	}
 }
 
 static void
@@ -2451,6 +2324,10 @@ drmmode_output_set_property(xf86OutputPtr output, Atom property,
 	if (cm_prop_index >= 0 && cm_prop_index < CM_DEGAMMA_LUT_SIZE) {
 		if (!output->crtc)
 			return FALSE;
+		if (!drmmode_cm_prop_supported(drmmode_output->drmmode,
+					       cm_prop_index))
+			return FALSE;
+
 		if (drmmode_crtc_stage_cm_prop(output->crtc, cm_prop_index,
 					       value))
 			return FALSE;
@@ -2462,7 +2339,7 @@ drmmode_output_set_property(xf86OutputPtr output, Atom property,
 	for (i = 0; i < drmmode_output->num_props; i++) {
 		drmmode_prop_ptr p = &drmmode_output->props[i];
 
-		if (p->atoms[0] != property)
+		if (p->num_atoms && p->atoms[0] != property)
 			continue;
 
 		if (p->mode_prop->flags & DRM_MODE_PROP_RANGE) {
@@ -2523,7 +2400,13 @@ static Bool drmmode_output_get_property(xf86OutputPtr output, Atom property)
 	cm_prop_id = get_cm_enum_from_str(NameForAtom(property));
 	if (output->crtc && cm_prop_id != CM_INVALID_PROP) {
 		drmmode_crtc = output->crtc->driver_private;
-
+		if (!drmmode_cm_prop_supported(drmmode_crtc->drmmode,
+					       cm_prop_id)) {
+			xf86DrvMsg(output->scrn->scrnIndex, X_ERROR,
+				   " %s color property not supported\n",
+				   NameForAtom(property));
+			return FALSE;
+		}
 		ret = rr_configure_and_change_cm_property(output, drmmode_crtc,
 							  cm_prop_id);
 		if (ret) {
@@ -2686,9 +2569,7 @@ drmmode_output_init(ScrnInfoPtr pScrn, drmmode_ptr drmmode, drmModeResPtr mode_r
 	drmModeEncoderPtr *kencoders = NULL;
 	drmmode_output_private_ptr drmmode_output;
 	drmModePropertyBlobPtr path_blob = NULL;
-#if XF86_CRTC_VERSION >= 8
 	Bool nonDesktop = FALSE;
-#endif
 	char name[32];
 	int i;
 	const char *s;
@@ -2701,12 +2582,10 @@ drmmode_output_init(ScrnInfoPtr pScrn, drmmode_ptr drmmode, drmModeResPtr mode_r
 
 	path_blob = koutput_get_prop_blob(pAMDGPUEnt->fd, koutput, "PATH");
 
-#if XF86_CRTC_VERSION >= 8
 	i = koutput_get_prop_idx(pAMDGPUEnt->fd, koutput, DRM_MODE_PROP_RANGE,
 				 "non-desktop");
 	if (i >= 0)
         	nonDesktop = koutput->prop_values[i] != 0;
-#endif
 
 	kencoders = calloc(sizeof(drmModeEncoderPtr), koutput->count_encoders);
 	if (!kencoders) {
@@ -2739,9 +2618,7 @@ drmmode_output_init(ScrnInfoPtr pScrn, drmmode_ptr drmmode, drmModeResPtr mode_r
 			drmmode_output = output->driver_private;
 			drmmode_output->output_id = mode_res->connectors[num];
 			drmmode_output->mode_output = koutput;
-#if XF86_CRTC_VERSION >= 8
 			output->non_desktop = nonDesktop;
-#endif
 			for (i = 0; i < koutput->count_encoders; i++) {
 				drmModeFreeEncoder(kencoders[i]);
 			}
@@ -2783,9 +2660,7 @@ drmmode_output_init(ScrnInfoPtr pScrn, drmmode_ptr drmmode, drmModeResPtr mode_r
 	output->interlaceAllowed = TRUE;
 	output->doubleScanAllowed = TRUE;
 	output->driver_private = drmmode_output;
-#if XF86_CRTC_VERSION >= 8
 	output->non_desktop = nonDesktop;
-#endif
 
 	output->possible_crtcs = 0xffffffff;
 	for (i = 0; i < koutput->count_encoders; i++) {
@@ -2814,7 +2689,7 @@ out_free_encoders:
 	return 0;
 }
 
-uint32_t find_clones(ScrnInfoPtr scrn, xf86OutputPtr output)
+static uint32_t find_clones(ScrnInfoPtr scrn, xf86OutputPtr output)
 {
 	drmmode_output_private_ptr drmmode_output =
 	    output->driver_private, clone_drmout;
@@ -2899,7 +2774,7 @@ static Bool drmmode_xf86crtc_resize(ScrnInfoPtr scrn, int width, int height)
 	int i, pitch, old_width, old_height, old_pitch;
 	int cpp = info->pixel_bytes;
 	PixmapPtr ppix = screen->GetScreenPixmap(screen);
-	int hint = AMDGPU_CREATE_PIXMAP_SCANOUT;
+	int hint = AMDGPU_CREATE_PIXMAP_SCANOUT | AMDGPU_CREATE_PIXMAP_FRONT;
 	void *fb_shadow;
 
 	if (scrn->virtualX == width && scrn->virtualY == height)
@@ -3005,7 +2880,6 @@ fail:
 static void
 drmmode_validate_leases(ScrnInfoPtr scrn)
 {
-#ifdef XF86_LEASE_VERSION
 	ScreenPtr screen = scrn->pScreen;
 	rrScrPrivPtr scr_priv = rrGetScrPriv(screen);
 	AMDGPUEntPtr pAMDGPUEnt = AMDGPUEntPriv(scrn);
@@ -3038,10 +2912,7 @@ drmmode_validate_leases(ScrnInfoPtr scrn)
 	}
 
 	free(lessees);
-#endif
 }
-
-#ifdef XF86_LEASE_VERSION
 
 static int
 drmmode_create_lease(RRLeasePtr lease, int *fd)
@@ -3127,14 +2998,10 @@ drmmode_terminate_lease(RRLeasePtr lease)
 	}
 }
 
-#endif // XF86_LEASE_VERSION
-
 static const xf86CrtcConfigFuncsRec drmmode_xf86crtc_config_funcs = {
 	.resize = drmmode_xf86crtc_resize,
-#ifdef XF86_LEASE_VERSION
 	.create_lease = drmmode_create_lease,
 	.terminate_lease = drmmode_terminate_lease
-#endif
 };
 
 static void
@@ -3206,7 +3073,7 @@ static void drmmode_notify_fd(int fd, int notify, void *data)
 	amdgpu_drm_handle_event(fd, &drmmode->event_context);
 }
 #else
-static void drm_wakeup_handler(pointer data, int err, pointer p)
+static void drm_wakeup_handler(void* data, int err, void* p)
 {
 	drmmode_ptr drmmode = data;
 	AMDGPUEntPtr pAMDGPUEnt = AMDGPUEntPriv(drmmode->scrn);
@@ -3282,8 +3149,9 @@ drmmode_page_flip_target_relative(AMDGPUEntPtr pAMDGPUEnt,
  *    AMD hardware.
  *
  * If the cached ID's are all 0 after calling this function, then color
- * management is not supported. For short, checking if the gamma LUT size
- * property ID == 0 is sufficient.
+ * management is not supported. The main important check during initialization
+ * is, if gamma_lut_size and degamma_lut_size values are not valid, then expose
+ * the corresponding gamma_lut and degamma_lut are not supported by the hardware.
  *
  * This should be called before CRTCs are initialized within pre_init, as the
  * cached values will be used there.
@@ -3298,8 +3166,8 @@ static void drmmode_cm_init(int drm_fd, drmmode_ptr drmmode,
 	drmModeObjectPropertiesPtr drm_props;
 	drmModePropertyPtr drm_prop;
 	enum drmmode_cm_prop cm_prop;
-	uint32_t cm_enabled = 0;
-	uint32_t cm_all_enabled = (1 << CM_NUM_PROPS) - 1;
+	Bool use_degamma_lut = false;
+	Bool use_gamma_lut = false;
 	int i;
 
 	memset(drmmode->cm_prop_ids, 0, sizeof(drmmode->cm_prop_ids));
@@ -3327,25 +3195,34 @@ static void drmmode_cm_init(int drm_fd, drmmode_ptr drmmode,
 		if (cm_prop == CM_INVALID_PROP)
 			continue;
 
-		if (cm_prop == CM_DEGAMMA_LUT_SIZE)
+		if (cm_prop == CM_DEGAMMA_LUT_SIZE) {
 			drmmode->degamma_lut_size = drm_props->prop_values[i];
-		else if (cm_prop == CM_GAMMA_LUT_SIZE)
+			if (drmmode->degamma_lut_size != 0)
+				use_degamma_lut = true;
+		} else if (cm_prop == CM_GAMMA_LUT_SIZE) {
 			drmmode->gamma_lut_size = drm_props->prop_values[i];
+			if (drmmode->gamma_lut_size != 0)
+				use_gamma_lut = true;
+		}
 
 		drmmode->cm_prop_ids[cm_prop] = drm_props->props[i];
-		cm_enabled |= 1 << cm_prop;
 
 		drmModeFreeProperty(drm_prop);
 	}
+
+	/* If the gamma_lut_size is not valid, then expose
+	 * gamma_lut is not supported by the hw
+	 */
+	if (!use_gamma_lut)
+		drmmode->cm_prop_ids[CM_GAMMA_LUT] = 0;
+
+	/* If the degamma_lut_size is not valid, then expose
+	 * degamma_lut is not supported by the hw
+	 */
+	if (!use_degamma_lut)
+		drmmode->cm_prop_ids[CM_DEGAMMA_LUT] = 0;
+
 	drmModeFreeObjectProperties(drm_props);
-
-	/* cm is enabled only if all prop ids are found */
-	if (cm_enabled == cm_all_enabled)
-		return;
-
-	/* Otherwise, disable DDX cm support */
-	memset(drmmode->cm_prop_ids, 0, sizeof(drmmode->cm_prop_ids));
-	drmmode->gamma_lut_size = drmmode->degamma_lut_size = 0;
 }
 
 Bool drmmode_pre_init(ScrnInfoPtr pScrn, drmmode_ptr drmmode, int cpp)
@@ -3392,7 +3269,7 @@ Bool drmmode_pre_init(ScrnInfoPtr pScrn, drmmode_ptr drmmode, int cpp)
 	drmmode_cm_init(pAMDGPUEnt->fd, drmmode, mode_res);
 
 	/* Spare the server the effort to compute and update unused CLUTs. */
-	if (pScrn->depth == 30 && !drmmode_cm_enabled(drmmode))
+	if (pScrn->depth == 30 && !drmmode_cm_prop_supported(drmmode, CM_GAMMA_LUT))
 		info->drmmode_crtc_funcs.gamma_set = NULL;
 
 	for (i = 0; i < mode_res->count_crtcs; i++) {
@@ -3574,7 +3451,7 @@ miPointerSpriteFuncRec drmmode_sprite_funcs = {
 	.DeviceCursorCleanup = drmmode_sprite_device_cursor_cleanup,
 };
 
-	
+
 void drmmode_adjust_frame(ScrnInfoPtr pScrn, drmmode_ptr drmmode, int x, int y)
 {
 	xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(pScrn);
@@ -3695,7 +3572,7 @@ Bool drmmode_setup_colormap(ScreenPtr pScreen, ScrnInfoPtr pScrn)
 			return FALSE;
 
 		if (pScrn->depth == 30) {
-			if (!drmmode_cm_enabled(&info->drmmode))
+			if (!drmmode_cm_prop_supported(&info->drmmode, CM_GAMMA_LUT))
 				return TRUE;
 
 			for (i = 0; i < xf86_config->num_crtc; i++) {
@@ -3769,7 +3646,8 @@ drmmode_find_output(ScrnInfoPtr scrn, int output_id, int *num_dvi,
 	return FALSE;
 }
 
-void
+#ifdef HAVE_LIBUDEV
+static void
 amdgpu_mode_hotplug(ScrnInfoPtr scrn, drmmode_ptr drmmode)
 {
 	xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(scrn);
@@ -3875,12 +3753,7 @@ restart_destroy:
 	drmmode_validate_leases(scrn);
 
 	if (changed) {
-#if XORG_VERSION_CURRENT >= XORG_VERSION_NUMERIC(1,14,99,2,0)
 		RRSetChanged(xf86ScrnToScreen(scrn));
-#else
-		rrScrPrivPtr rrScrPriv = rrGetScrPriv(scrn->pScreen);
-		rrScrPriv->changed = TRUE;
-#endif
 		RRTellChanged(xf86ScrnToScreen(scrn));
 	}
 
@@ -3889,7 +3762,6 @@ out:
 	RRGetInfo(xf86ScrnToScreen(scrn), TRUE);
 }
 
-#ifdef HAVE_LIBUDEV
 static void drmmode_handle_uevents(int fd, void *closure)
 {
 	drmmode_ptr drmmode = closure;

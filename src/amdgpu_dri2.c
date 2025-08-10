@@ -25,9 +25,8 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
  */
-#ifdef HAVE_CONFIG_H
 #include "config.h"
-#endif
+#include <xorg-server.h>
 
 #include "amdgpu_drv.h"
 #include "amdgpu_dri2.h"
@@ -200,7 +199,7 @@ amdgpu_dri2_create_buffer2(ScreenPtr pScreen,
 
 error:
 	free(buffers);
-	(*pScreen->DestroyPixmap) (pixmap);
+	dixDestroyPixmap(pixmap, 0);
 	return NULL;
 }
 
@@ -224,7 +223,7 @@ amdgpu_dri2_destroy_buffer2(ScreenPtr pScreen,
 		private->refcnt--;
 		if (private->refcnt == 0) {
 			if (private->pixmap)
-				(*pScreen->DestroyPixmap) (private->pixmap);
+				dixDestroyPixmap(private->pixmap, 0);
 
 			free(buffers->driverPrivate);
 			free(buffers);
@@ -344,8 +343,7 @@ static void amdgpu_dri2_unref_buffer(BufferPtr buffer)
 }
 
 static void
-amdgpu_dri2_client_state_changed(CallbackListPtr * ClientStateCallback,
-				 pointer data, pointer calldata)
+amdgpu_dri2_client_state_changed(CallbackListPtr * cbl, void* data, void* calldata)
 {
 	NewClientInfoRec *clientinfo = calldata;
 	ClientPtr pClient = clientinfo->client;
@@ -558,7 +556,7 @@ static Bool update_front(DrawablePtr draw, DRI2BufferPtr front)
 	if (!amdgpu_get_flink_name(pAMDGPUEnt, pixmap, &front->name))
 		return FALSE;
 
-	(*draw->pScreen->DestroyPixmap) (priv->pixmap);
+	dixDestroyPixmap(priv->pixmap, 0);
 	front->pitch = pixmap->devKind;
 	front->cpp = pixmap->drawable.bitsPerPixel / 8;
 	priv->pixmap = pixmap;
@@ -851,7 +849,7 @@ static int amdgpu_dri2_get_msc(DrawablePtr draw, CARD64 * ust, CARD64 * msc)
 }
 
 static
-CARD32 amdgpu_dri2_deferred_event(OsTimerPtr timer, CARD32 now, pointer data)
+CARD32 amdgpu_dri2_deferred_event(OsTimerPtr timer, CARD32 now, void* data)
 {
 	DRI2FrameEventPtr event_info = (DRI2FrameEventPtr) data;
 	xf86CrtcPtr crtc = event_info->crtc;

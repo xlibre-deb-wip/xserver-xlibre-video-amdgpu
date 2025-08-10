@@ -157,9 +157,7 @@ typedef struct {
 	drmModeConnectorPtr mode_output;
 	drmModeEncoderPtr *mode_encoders;
 	drmModePropertyBlobPtr edid_blob;
-#if XORG_VERSION_CURRENT >= XORG_VERSION_NUMERIC(1, 17, 99, 901, 0)
 	drmModePropertyBlobPtr tile_blob;
-#endif
 	int dpms_enum_id;
 	int num_props;
 	drmmode_prop_ptr props;
@@ -183,9 +181,11 @@ enum drmmode_flip_sync {
  * Return TRUE if kernel supports non-legacy color management.
  */
 static inline Bool
-drmmode_cm_enabled(drmmode_ptr drmmode)
+drmmode_cm_prop_supported(drmmode_ptr drmmode, enum drmmode_cm_prop cm_prop_index)
 {
-	return drmmode->cm_prop_ids[CM_GAMMA_LUT_SIZE] != 0;
+	if (drmmode->cm_prop_ids[cm_prop_index] == 0)
+		return FALSE;
+	return TRUE;
 }
 
 /* Can the page flip ioctl be used for this CRTC? */
@@ -240,7 +240,7 @@ drmmode_crtc_scanout_destroy(PixmapPtr *scanout)
 	if (!*scanout)
 		return;
 
-	(*scanout)->drawable.pScreen->DestroyPixmap(*scanout);
+	dixDestroyPixmap(*scanout, 0);
 	(*scanout) = NULL;
 }
 
