@@ -1,4 +1,2 @@
-#git=git://anongit.freedesktop.org/xorg/driver/xf86-video-amdgpu
-version=3
-opts=pgpsigurlmangle=s/$/.sig/ \
-https://xorg.freedesktop.org/releases/individual/driver/ xf86-video-amdgpu-(.*)\.tar\.gz
+version=4
+https://github.com/X11Libre/xf86-video-amdgpu/tags .*/xlibre-xf86-video-amdgpu-(.*)@ARCHIVE_EXT@
