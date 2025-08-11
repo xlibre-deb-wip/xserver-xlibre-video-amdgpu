@@ -1,6 +1,7 @@
 tmp
 debhelper-build-stamp
 *.log
+*.substvars
 */
 !local/
 !patches/
