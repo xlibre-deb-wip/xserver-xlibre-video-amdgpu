@@ -1,0 +1,10 @@
+tmp
+debhelper-build-stamp
+*.log
+*/
+!local/
+!patches/
+!po/
+!source/
+!tests/
+!upstream/
