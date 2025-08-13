@@ -4,7 +4,7 @@
 DPKG_EXPORT_BUILDFLAGS = 1
 include /usr/share/dpkg/default.mk
 
-XXV=xserver-xorg-video
+XXV=xserver-xlibre-video
 
 override_dh_auto_configure:
 	dh_auto_configure --builddirectory=build/ -- \
@@ -23,7 +23,7 @@ override_dh_missing:
 
 # Debug packages:
 override_dh_strip:
-	dh_strip -p$(XXV)-amdgpu --dbgsym-migration="$(XXV)-amdgpu-dbg (<< 18.0.1-2~)"
+	dh_strip -p$(XXV)-amdgpu
 
 # That's a plugin, use appropriate warning level:
 override_dh_shlibdeps:
