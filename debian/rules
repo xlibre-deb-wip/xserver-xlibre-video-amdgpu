@@ -8,7 +8,8 @@ XXV=xserver-xlibre-video
 
 override_dh_auto_configure:
 	dh_auto_configure --builddirectory=build/ -- \
-		--libdir=/usr/lib
+		--libdir=/usr/lib \
+		--with-xorg-module-dir=/usr/lib/xorg/modules
 
 override_dh_auto_install:
 	dh_auto_install --destdir debian/tmp
