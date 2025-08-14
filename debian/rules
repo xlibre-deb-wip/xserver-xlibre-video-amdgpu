@@ -5,6 +5,8 @@ DPKG_EXPORT_BUILDFLAGS = 1
 include /usr/share/dpkg/default.mk
 
 XXV=xserver-xlibre-video
+XDEP = $(shell cat /usr/share/xserver-xorg/videodrvdep)
+XSUB = debian/$(XXV)-amdgpu.substvars
 
 override_dh_auto_configure:
 	dh_auto_configure --builddirectory=build/ -- \
@@ -29,6 +31,11 @@ override_dh_strip:
 # That's a plugin, use appropriate warning level:
 override_dh_shlibdeps:
 	dh_shlibdeps -- --warnings=6
+
+override_dh_xsf_substvars:
+	echo "xviddriver:Depends=$(XDEP)" >> $(XSUB)
+	echo "xviddriver:Provides=xlibre-driver-video" >> $(XSUB)
+#	dh_xsf_substvars
 
 %:
 	dh $@ --with quilt,xsf --builddirectory=build/
