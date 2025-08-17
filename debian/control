@@ -25,7 +25,7 @@ Depends:
  ${misc:Depends},
  ${xviddriver:Depends},
 Provides:
- xserver-xorg-video-amdgpu,
+ xserver-xorg-video-amdgpu (= ${binary:Version}),
  ${xviddriver:Provides}
 Suggests: firmware-amd-graphics
 Description: XLibre X server -- AMDGPU display driver
