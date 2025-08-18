@@ -1,3 +1,10 @@
+xserver-xlibre-video-amdgpu (23.0.0.4-2) unstable; urgency=medium
+
+  * debian/control: Pin versions in Provides fields
+  * debian/gbp.conf: Use DEP-14 style branches
+
+ -- apebl <a@pebl.cc>  Mon, 18 Aug 2025 07:12:57 +0000
+
 xserver-xlibre-video-amdgpu (23.0.0.4-1) unstable; urgency=low
 
   * Initial release.
