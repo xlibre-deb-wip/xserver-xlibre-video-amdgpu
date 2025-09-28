@@ -1,3 +1,9 @@
+xserver-xlibre-video-amdgpu (23.0.0.5-1) unstable; urgency=medium
+
+  * New upstream version 23.0.0.5
+
+ -- apebl <a@pebl.cc>  Sun, 28 Sep 2025 14:18:36 +0000
+
 xserver-xlibre-video-amdgpu (23.0.0.4-2) unstable; urgency=medium
 
   * debian/control: Pin versions in Provides fields
