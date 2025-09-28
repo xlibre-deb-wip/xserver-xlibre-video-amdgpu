@@ -1614,7 +1614,7 @@ static void drmmode_show_cursor(xf86CrtcPtr crtc)
 	drmIoctl(pAMDGPUEnt->fd, DRM_IOCTL_MODE_CURSOR, &arg);
 }
 
-/* Xorg expects a non-NULL return value from drmmode_crtc_shadow_allocate, and
+/* Xlibre expects a non-NULL return value from drmmode_crtc_shadow_allocate, and
  * passes that back to drmmode_crtc_scanout_create; it doesn't use it for
  * anything else.
  */
@@ -2782,7 +2782,7 @@ static Bool drmmode_xf86crtc_resize(ScrnInfoPtr scrn, int width, int height)
 
 	if (width > xf86_config->maxWidth || height > xf86_config->maxHeight) {
 		xf86DrvMsg(scrn->scrnIndex, X_WARNING,
-			   "Xorg tried resizing screen to %dx%d, but maximum "
+			   "Xlibre tried resizing screen to %dx%d, but maximum "
 			   "supported is %dx%d\n", width, height,
 			   xf86_config->maxWidth, xf86_config->maxHeight);
 		return FALSE;
@@ -3066,24 +3066,11 @@ drmmode_flip_handler(xf86CrtcPtr crtc, uint32_t frame, uint64_t usec, void *even
 	}
 }
 
-#if HAVE_NOTIFY_FD
 static void drmmode_notify_fd(int fd, int notify, void *data)
 {
 	drmmode_ptr drmmode = data;
 	amdgpu_drm_handle_event(fd, &drmmode->event_context);
 }
-#else
-static void drm_wakeup_handler(void* data, int err, void* p)
-{
-	drmmode_ptr drmmode = data;
-	AMDGPUEntPtr pAMDGPUEnt = AMDGPUEntPriv(drmmode->scrn);
-	fd_set *read_mask = p;
-
-	if (err >= 0 && FD_ISSET(pAMDGPUEnt->fd, read_mask)) {
-		amdgpu_drm_handle_event(pAMDGPUEnt->fd, &drmmode->event_context);
-	}
-}
-#endif
 
 static Bool drmmode_probe_page_flip_target(AMDGPUEntPtr pAMDGPUEnt)
 {
@@ -3315,13 +3302,7 @@ void drmmode_init(ScrnInfoPtr pScrn, drmmode_ptr drmmode)
 
 	info->drmmode_inited = TRUE;
 	if (pAMDGPUEnt->fd_wakeup_registered != serverGeneration) {
-#if HAVE_NOTIFY_FD
 		SetNotifyFd(pAMDGPUEnt->fd, drmmode_notify_fd, X_NOTIFY_READ, drmmode);
-#else
-		AddGeneralSocket(pAMDGPUEnt->fd);
-		RegisterBlockAndWakeupHandlers((BlockHandlerProcPtr) NoopDDA,
-					       drm_wakeup_handler, drmmode);
-#endif
 		pAMDGPUEnt->fd_wakeup_registered = serverGeneration;
 		pAMDGPUEnt->fd_wakeup_ref = 1;
 	} else
@@ -3343,13 +3324,7 @@ void drmmode_fini(ScrnInfoPtr pScrn, drmmode_ptr drmmode)
 
 	if (pAMDGPUEnt->fd_wakeup_registered == serverGeneration &&
 	    !--pAMDGPUEnt->fd_wakeup_ref) {
-#if HAVE_NOTIFY_FD
 		RemoveNotifyFd(pAMDGPUEnt->fd);
-#else
-		RemoveGeneralSocket(pAMDGPUEnt->fd);
-		RemoveBlockAndWakeupHandlers((BlockHandlerProcPtr) NoopDDA,
-					     drm_wakeup_handler, drmmode);
-#endif
 	}
 }
 
